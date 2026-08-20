@@ -1,181 +1,167 @@
 package com.example.ela_devicemanager
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import com.example.ela_devicemanager.ui.theme.Ela_DeviceManagerTheme
+import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
-
-    private val bleScanner by lazy { BleScanner(this) }
-    private val deviceList = mutableStateListOf<DeviceItem>()
-    private var isScanningState = mutableStateOf(false)
-
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
-            startBleScan()
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         setContent {
-            Ela_DeviceManagerTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    MainScreen(
-                        modifier = Modifier.padding(innerPadding),
-                        devices = deviceList,
-                        isScanning = isScanningState.value,
-                        onScanClick = { checkPermissionsAndScan() }
-                    )
-                }
-            }
-        }
-    }
-
-    private fun checkPermissionsAndScan() {
-        val context = this
-        val requiredPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT
-            )
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-
-        val missingPermissions = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-        }
-
-        if (missingPermissions.isEmpty()) {
-            startBleScan()
-        } else {
-            requestPermissionLauncher.launch(missingPermissions.toTypedArray())
-        }
-    }
-
-    private fun startBleScan() {
-        deviceList.clear()
-        isScanningState.value = true
-
-        bleScanner.startScanning(this, object : BleScanner.BleScanListener {
-            override fun onDeviceFound(deviceName: String, deviceAddress: String, rssi: Int, manufacturerDataStr: String) {
-                runOnUiThread {
-                    if (deviceList.none { it.address == deviceAddress }) {
-                        deviceList.add(DeviceItem(deviceName, deviceAddress, rssi, manufacturerDataStr))
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    primary = NeonGreen,
+                    background = HackerBlack,
+                    surface = HackerDarkSurface,
+                    onPrimary = HackerBlack,
+                    onBackground = NeonGreen,
+                    onSurface = NeonGreen
+                )
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    Scaffold(
+                        containerColor = HackerBlack,
+                        modifier = Modifier.fillMaxSize()
+                    ) { innerPadding ->
+                        MainDashboard(
+                            modifier = Modifier.padding(innerPadding),
+                            onNavigateToNfc = {
+                                startActivity(Intent(this, NfcConfigActivity::class.java))
+                            },
+                            onNavigateToBle = {
+                                startActivity(Intent(this, BluetoothActivity::class.java))
+                            },
+                            onNavigateToFiles = {
+                                // Módulo de archivos guardados (Próximamente)
+                            }
+                        )
                     }
                 }
             }
-
-            override fun onScanFinished() {
-                runOnUiThread {
-                    isScanningState.value = false
-                }
-            }
-        })
+        }
     }
 }
 
-data class DeviceItem(val name: String, val address: String, val rssi: Int, val rawData: String)
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(
+fun MainDashboard(
     modifier: Modifier = Modifier,
-    devices: List<DeviceItem>,
-    isScanning: Boolean,
-    onScanClick: () -> Unit
+    onNavigateToNfc: () -> Unit,
+    onNavigateToBle: () -> Unit,
+    onNavigateToFiles: () -> Unit
 ) {
-    // Estado para almacenar el texto que escribe el usuario en el buscador
-    var searchQuery by remember { mutableStateOf("") }
-
-    // Filtramos la lista en tiempo real según lo que el usuario escriba
-    val filteredDevices = devices.filter { device ->
-        device.name.contains(searchQuery, ignoreCase = true) ||
-                device.address.contains(searchQuery, ignoreCase = true) ||
-                device.rawData.contains(searchQuery, ignoreCase = true)
-    }
-
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(HackerBlack)
+            .padding(20.dp)
     ) {
+        Spacer(modifier = Modifier.height(20.dp))
         Text(
-            text = "ELA Device Manager",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 12.dp)
+            text = "ELA_SYS // TERMINAL",
+            color = NeonGreen,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "SYSTEM READY...",
+            color = HackerGray,
+            fontSize = 14.sp
         )
 
-        // Botón de Escaneo
-        Button(
-            onClick = onScanClick,
-            enabled = !isScanning,
-            modifier = Modifier.fillMaxWidth().height(50.dp)
-        ) {
-            Text(text = if (isScanning) "Buscando Blue PUCK..." else "Escanear Sensores BLE")
-        }
+        Spacer(modifier = Modifier.height(36.dp))
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Barra de Búsqueda por Texto
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            label = { Text("Filtrar por nombre, MAC o trama...") },
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (isScanning) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            Spacer(modifier = Modifier.height(12.dp))
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            MenuHackerCard(
+                title = "[ NFC_CONFIG ]",
+                subtitle = "Proximidad / Tags",
+                modifier = Modifier.weight(1f).height(150.dp),
+                onClick = onNavigateToNfc
+            )
+            MenuHackerCard(
+                title = "[ BLE_SCANNER ]",
+                subtitle = "Sensores de aire",
+                modifier = Modifier.weight(1f).height(150.dp),
+                onClick = onNavigateToBle
+            )
         }
 
-        // Lista Filtrada
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(filteredDevices) { device ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(text = device.name, style = MaterialTheme.typography.titleMedium)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = "MAC: ${device.address}", style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "Señal: ${device.rssi} dBm", style = MaterialTheme.typography.bodySmall)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = "Trama: ${device.rawData}", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
+            MenuHackerCard(
+                title = "[ SAVED_FILES ]",
+                subtitle = "Registros y Logs",
+                modifier = Modifier.weight(1f).height(150.dp),
+                onClick = onNavigateToFiles
+            )
+            Spacer(modifier = Modifier.weight(1f))
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            TextButton(onClick = { }) {
+                Text(text = "// ABOUT_US", color = NeonGreen, fontSize = 14.sp)
             }
+        }
+    }
+}
+
+@Composable
+fun MenuHackerCard(title: String, subtitle: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Card(
+        modifier = modifier
+            .border(1.dp, NeonGreen, RoundedCornerShape(12.dp))
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = HackerDarkSurface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = title,
+                color = NeonGreen,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = subtitle,
+                color = HackerGray,
+                fontSize = 12.sp
+            )
         }
     }
 }

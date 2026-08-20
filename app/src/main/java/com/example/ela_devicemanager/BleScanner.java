@@ -1,118 +1,130 @@
 package com.example.ela_devicemanager;
 
-import android.Manifest;
+import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.SparseArray;
-import androidx.core.app.ActivityCompat;
+import android.util.Log;
 
+import java.util.ArrayList;
+import java.util.List;
+
+@SuppressLint("MissingPermission")
 public class BleScanner {
 
-    private final BluetoothLeScanner bluetoothLeScanner;
+    private final BluetoothAdapter bluetoothAdapter;
+    private BluetoothLeScanner scanner;
     private boolean isScanning = false;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private Context appContext;
-
-    private static final long SCAN_PERIOD = 10000; // 10 segundos
+    private ScanCallback currentScanCallback;
 
     public interface BleScanListener {
-        // CORREGIDO: Ahora devuelve 'void' en lugar de 'String'
         void onDeviceFound(String deviceName, String deviceAddress, int rssi, String manufacturerDataStr);
         void onScanFinished();
     }
 
-    private BleScanListener scanListener;
-
     public BleScanner(Context context) {
         BluetoothManager bluetoothManager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
         if (bluetoothManager != null) {
-            BluetoothAdapter bluetoothAdapter = bluetoothManager.getAdapter();
-            if (bluetoothAdapter != null) {
-                this.bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
-            } else {
-                this.bluetoothLeScanner = null;
-            }
+            bluetoothAdapter = bluetoothManager.getAdapter();
         } else {
-            this.bluetoothLeScanner = null;
+            bluetoothAdapter = null;
         }
     }
 
-    public void startScanning(Context context, BleScanListener listener) {
-        if (bluetoothLeScanner == null || isScanning) return;
-        this.appContext = context.getApplicationContext();
-        this.scanListener = listener;
+    public void startScanning(Context context, final BleScanListener listener) {
+        // Tiempo de escaneo agresivo: 12 segundos
+        long SCAN_PERIOD_MS = 12000;
 
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            Log.e("BLE_SCANNER", "Bluetooth no está disponible o encendido.");
+            listener.onScanFinished();
             return;
         }
 
-        handler.postDelayed(() -> stopScanning(context), SCAN_PERIOD);
+        scanner = bluetoothAdapter.getBluetoothLeScanner();
+        if (scanner == null) {
+            listener.onScanFinished();
+            return;
+        }
+
+        if (isScanning) return;
+
+        ScanSettings settings = new ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .setReportDelay(0)
+                .build();
+
+        List<ScanFilter> filters = new ArrayList<>();
+
+        currentScanCallback = new ScanCallback() {
+            @Override
+            public void onScanResult(int callbackType, ScanResult result) {
+                super.onScanResult(callbackType, result);
+
+                ScanRecord scanRecord = result.getScanRecord();
+
+                String deviceName = result.getDevice().getName();
+                if (deviceName == null && scanRecord != null) {
+                    deviceName = scanRecord.getDeviceName();
+                }
+
+                // --- FILTRO DE SENSORES ANÓNIMOS ---
+                // Si el dispositivo no reporta ningún nombre o está vacío,
+                // interrumpimos la ejecución y NO lo mandamos a la UI.
+                if (deviceName == null || deviceName.trim().isEmpty()) {
+                    return;
+                }
+                // -----------------------------------
+
+                String deviceAddress = result.getDevice().getAddress();
+                int rssi = result.getRssi();
+
+                StringBuilder rawDataStr = new StringBuilder();
+                if (scanRecord != null && scanRecord.getBytes() != null) {
+                    for (byte b : scanRecord.getBytes()) {
+                        rawDataStr.append(String.format("%02X", b));
+                    }
+                } else {
+                    rawDataStr.append("NO_DATA");
+                }
+
+                listener.onDeviceFound(deviceName, deviceAddress, rssi, rawDataStr.toString());
+            }
+
+            @Override
+            public void onScanFailed(int errorCode) {
+                super.onScanFailed(errorCode);
+                Log.e("BLE_SCANNER", "Fallo en el escaneo. Error Code: " + errorCode);
+            }
+        };
 
         isScanning = true;
-        bluetoothLeScanner.startScan(scanCallback);
+        scanner.startScan(filters, settings, currentScanCallback);
+
+        handler.postDelayed(() -> {
+            stopScanning();
+            listener.onScanFinished();
+        }, SCAN_PERIOD_MS);
     }
 
-    public void stopScanning(Context context) {
-        if (!isScanning || bluetoothLeScanner == null) return;
-
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
-            bluetoothLeScanner.stopScan(scanCallback);
-        }
-        isScanning = false;
-        if (scanListener != null) {
-            scanListener.onScanFinished();
-        }
-    }
-
-    private final ScanCallback scanCallback = new ScanCallback() {
-        @Override
-        public void onScanResult(int callbackType, ScanResult result) {
-            super.onScanResult(callbackType, result);
-
-            if (appContext != null && ActivityCompat.checkSelfPermission(appContext, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                if (result.getDevice() != null) {
-                    String name = result.getDevice().getName();
-
-                    // Ocultamos dispositivos sin nombre comercial
-                    if (name == null || name.trim().isEmpty()) {
-                        return;
-                    }
-
-                    String address = result.getDevice().getAddress();
-                    int rssi = result.getRssi();
-
-                    StringBuilder dataHex = new StringBuilder();
-                    if (result.getScanRecord() != null) {
-                        SparseArray<byte[]> manufacturerData = result.getScanRecord().getManufacturerSpecificData();
-                        if (manufacturerData != null && manufacturerData.size() > 0) {
-                            for (int i = 0; i < manufacturerData.size(); i++) {
-                                int manufacturerId = manufacturerData.keyAt(i);
-                                byte[] data = manufacturerData.valueAt(i);
-                                dataHex.append("ID: ").append(manufacturerId).append(" [");
-                                if (data != null) {
-                                    for (byte b : data) {
-                                        dataHex.append(String.format("%02X ", b));
-                                    }
-                                }
-                                dataHex.append("]");
-                            }
-                        } else {
-                            dataHex.append("Sin datos de fabricante");
-                        }
-                    }
-
-                    if (scanListener != null) {
-                        scanListener.onDeviceFound(name, address, rssi, dataHex.toString());
-                    }
-                }
+    private void stopScanning() {
+        if (isScanning && scanner != null && currentScanCallback != null) {
+            try {
+                scanner.stopScan(currentScanCallback);
+            } catch (Exception e) {
+                Log.e("BLE_SCANNER", "Error deteniendo el escaneo: " + e.getMessage());
             }
+            isScanning = false;
+            currentScanCallback = null;
         }
-    };
+    }
 }
