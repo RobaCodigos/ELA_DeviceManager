@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.SparseArray;
 import androidx.core.app.ActivityCompat;
 
 public class BleScanner {
@@ -17,13 +18,13 @@ public class BleScanner {
     private final BluetoothLeScanner bluetoothLeScanner;
     private boolean isScanning = false;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private Context appContext; // Almacenamos el contexto de forma segura
+    private Context appContext;
 
-    // Tiempo límite de escaneo (10 segundos)
-    private static final long SCAN_PERIOD = 10000;
+    private static final long SCAN_PERIOD = 10000; // 10 segundos
 
     public interface BleScanListener {
-        void onDeviceFound(String deviceName, String deviceAddress, int rssi);
+        // CORREGIDO: Ahora devuelve 'void' en lugar de 'String'
+        void onDeviceFound(String deviceName, String deviceAddress, int rssi, String manufacturerDataStr);
         void onScanFinished();
     }
 
@@ -48,7 +49,6 @@ public class BleScanner {
         this.appContext = context.getApplicationContext();
         this.scanListener = listener;
 
-        // Comprobación de permisos de escaneo requerida para Android 12+
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
             return;
         }
@@ -76,18 +76,40 @@ public class BleScanner {
         public void onScanResult(int callbackType, ScanResult result) {
             super.onScanResult(callbackType, result);
 
-            // Verificamos permisos de BLUETOOTH_CONNECT antes de leer el nombre o la MAC del dispositivo
             if (appContext != null && ActivityCompat.checkSelfPermission(appContext, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                 if (result.getDevice() != null) {
                     String name = result.getDevice().getName();
+
+                    // Ocultamos dispositivos sin nombre comercial
+                    if (name == null || name.trim().isEmpty()) {
+                        return;
+                    }
+
                     String address = result.getDevice().getAddress();
                     int rssi = result.getRssi();
 
-                    // Filtramos por dispositivos ELA (Blue PUCK)
-                    if (name != null && (name.contains("PUCK") || name.contains("ELA"))) {
-                        if (scanListener != null) {
-                            scanListener.onDeviceFound(name, address, rssi);
+                    StringBuilder dataHex = new StringBuilder();
+                    if (result.getScanRecord() != null) {
+                        SparseArray<byte[]> manufacturerData = result.getScanRecord().getManufacturerSpecificData();
+                        if (manufacturerData != null && manufacturerData.size() > 0) {
+                            for (int i = 0; i < manufacturerData.size(); i++) {
+                                int manufacturerId = manufacturerData.keyAt(i);
+                                byte[] data = manufacturerData.valueAt(i);
+                                dataHex.append("ID: ").append(manufacturerId).append(" [");
+                                if (data != null) {
+                                    for (byte b : data) {
+                                        dataHex.append(String.format("%02X ", b));
+                                    }
+                                }
+                                dataHex.append("]");
+                            }
+                        } else {
+                            dataHex.append("Sin datos de fabricante");
                         }
+                    }
+
+                    if (scanListener != null) {
+                        scanListener.onDeviceFound(name, address, rssi, dataHex.toString());
                     }
                 }
             }
